@@ -2,6 +2,9 @@ import Stripe from 'stripe';
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
+const BASE44_API_URL = 'https://api.base44.app'; // URL API base44
+const BASE44_APP_ID = 'viola2'; // Il tuo app ID
+
 export const config = { api: { bodyParser: false } };
 
 async function buffer(readable) {
@@ -13,18 +16,17 @@ async function buffer(readable) {
 }
 
 // Funzione per salvare log su base44
-async function saveWebhookLog(eventType, eventId, userId, userEmail, status, payload, errorMessage = null) {
+async function saveWebhookLog(eventType, eventId, userEmail, status, payload, errorMessage = null) {
   try {
-    const response = await fetch('https://viola2.base44.app/api/entities/WebhookLog', {
+    const response = await fetch(`${BASE44_API_URL}/apps/${BASE44_APP_ID}/entities/WebhookLog`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        // Aggiungi qui l'autenticazione se necessaria
+        'Authorization': `Bearer ${process.env.BASE44_API_KEY}` // Da aggiungere su Vercel
       },
       body: JSON.stringify({
         event_type: eventType,
         event_id: eventId,
-        user_id: userId,
         user_email: userEmail,
         status: status,
         payload: payload,
@@ -32,7 +34,7 @@ async function saveWebhookLog(eventType, eventId, userId, userEmail, status, pay
         processed: false
       })
     });
-
+    
     if (!response.ok) {
       console.error('Failed to save webhook log:', await response.text());
     }
@@ -52,19 +54,16 @@ export default async function handler(req, res) {
 
     console.log('✅ Webhook received:', event.type);
 
-    let userId = null;
     let userEmail = null;
 
     switch (event.type) {
       case 'checkout.session.completed':
         const session = event.data.object;
-        userId = session.client_reference_id || session.metadata?.userId;
-        userEmail = session.customer_email || session.customer_details?.email;
+        userEmail = session.customer_details?.email || session.metadata?.userEmail;
         
         await saveWebhookLog(
           event.type,
           event.id,
-          userId,
           userEmail,
           'success',
           event.data.object
@@ -76,22 +75,13 @@ export default async function handler(req, res) {
       case 'customer.subscription.deleted':
       case 'customer.subscription.canceled':
         const subscription = event.data.object;
-        userId = subscription.metadata?.userId;
-        
-        // Ottieni email dal customer
-        try {
-          const customer = await stripe.customers.retrieve(subscription.customer);
-          userEmail = customer.email;
-        } catch (err) {
-          console.error('Error getting customer:', err);
-        }
+        userEmail = subscription.metadata?.userEmail;
         
         await saveWebhookLog(
           event.type,
           event.id,
-          userId,
           userEmail,
-          'pending',
+          'success',
           event.data.object
         );
         
@@ -100,13 +90,11 @@ export default async function handler(req, res) {
 
       case 'invoice.payment_failed':
         const invoice = event.data.object;
-        userId = invoice.subscription_metadata?.userId;
         userEmail = invoice.customer_email;
         
         await saveWebhookLog(
           event.type,
           event.id,
-          userId,
           userEmail,
           'error',
           event.data.object,
@@ -124,11 +112,9 @@ export default async function handler(req, res) {
   } catch (err) {
     console.error('❌ Webhook error:', err.message);
     
-    // Salva anche gli errori
     await saveWebhookLog(
-      'webhook.error',
-      'error_' + Date.now(),
-      null,
+      'webhook_error',
+      'unknown',
       null,
       'error',
       { error: err.message },

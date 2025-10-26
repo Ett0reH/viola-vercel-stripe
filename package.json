@@ -1,0 +1,11 @@
+{
+  "name": "viola-stripe-backend",
+  "version": "1.0.0",
+  "type": "module",
+  "dependencies": {
+    "stripe": "^14.10.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
